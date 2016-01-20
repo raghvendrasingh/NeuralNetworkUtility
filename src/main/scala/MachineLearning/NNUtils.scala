@@ -157,9 +157,9 @@ object NNUtils {
     val outputDelta = -(targetLabels - layerOutputs.last) :* (layerOutputs.last :* (DenseMatrix.ones[Double](layerOutputs.last.rows, layerOutputs.last.cols) - layerOutputs.last))
     var delta = outputDelta
     val size = numNodesInLayers.size - 2
-    val temp: DenseMatrix[Double] = layerOutputs(size) * delta.t
-    val temp11: DenseMatrix[Double] = ((1.toDouble/numSamples) * temp)  + (layerWeights.last * weightDecay)
-    deltaLayerWeights = temp11 +: deltaLayerWeights
+    val tempDeltaWeight: DenseMatrix[Double] = layerOutputs(size) * delta.t
+    val deltaWeight: DenseMatrix[Double] = ((1.toDouble/numSamples) * tempDeltaWeight)  + (layerWeights.last * weightDecay)
+    deltaLayerWeights = deltaWeight +: deltaLayerWeights
     deltaLayerBiases = ((1.toDouble/numSamples) * sum(delta(*, ::))) +: deltaLayerBiases
     for (i <- numNodesInLayers.size - 2 to 1 by -1) {
       val temp1: DenseMatrix[Double] = layerWeights(i) * delta
