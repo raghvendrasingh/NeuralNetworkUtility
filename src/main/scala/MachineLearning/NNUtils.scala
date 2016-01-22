@@ -73,11 +73,6 @@ object NNUtils {
       tempOut = tempOut(::, *) + biasList(i)
       out = NNUtils.sigmoidMatrix(tempOut)
     }
-    /** Calculate output for output layer using softmax function */
-    /*var softmaxInput: DenseMatrix[Double] = weightList.last.t * out
-    softmaxInput = softmaxInput(::, *) + biasList.last
-    val output = NNUtils.softmaxMatrix(softmaxInput)*/
-
     var sum2 = 0.0
     for (i <- weightList.indices) {
       val m = weightList(i) map (x => x*x)
@@ -85,6 +80,50 @@ object NNUtils {
     }
     val cost = ((1.toDouble/(2*numSamples)) * sum((out - trainingLabels) map (x => x*x))) + (weightDecayParameter/2)*sum2
     cost
+  }
+
+
+  private def logMatrix(m: DenseMatrix[Double]): DenseMatrix[Double] = {
+    m map (x => math.log(x))
+  }
+
+  private def softmaxCost(numSamples: Int, trainingData: DenseMatrix[Double], trainingLabels: DenseMatrix[Double],
+                          weightDecayParameter: Double, params: DenseVector[Double]): Double = {
+    val thetaTup = NNUtils.deserializeParams(numNodesInLayers, params)
+    val weightList = thetaTup._1
+    val biasList = thetaTup._2
+    var out = trainingData
+    for (i <- 0 to numNodesInLayers.size - 3) {
+      var tempOut: DenseMatrix[Double] = weightList(i).t * out
+      tempOut = tempOut(::, *) + biasList(i)
+      out = NNUtils.sigmoidMatrix(tempOut)
+    }
+    /** Calculate output for output layer using softmax function */
+    var softmaxInput: DenseMatrix[Double] = weightList.last.t * out
+    softmaxInput = softmaxInput(::, *) + biasList.last
+    val temp1 = NNUtils.softmaxMatrix(softmaxInput)
+    val temp2 = trainingLabels :* logMatrix(temp1)
+    var temp3 = 0.0
+    temp2 map (x => {temp3 = temp3 + x})
+    var temp4 = 0.0
+    for (i <- weightList.indices) {
+      val m = weightList(i) map (x => x*x)
+      temp4 = temp4 + sum(m)
+    }
+    (-1.toDouble/numSamples) * temp3 + (weightDecayParameter/2) * temp4
+  }
+
+  private def computeNumericalGradientSE(numSamples: Int, trainingData: DenseMatrix[Double], trainingLabels: DenseMatrix[Double],
+                                          weightDecayParameter: Double, params: DenseVector[Double]): DenseVector[Double] = {
+    val m = params.size
+    val numGrad = DenseVector.zeros[Double](m)
+    val eps = 0.0001
+    for (i <- 0 to m-1) {
+      val q = DenseVector.zeros[Double](m)
+      q(i) = q(i) + eps
+      numGrad(i) = ( softmaxCost(numSamples, trainingData, trainingLabels, weightDecayParameter, params+q) - softmaxCost(numSamples, trainingData, trainingLabels, weightDecayParameter, params-q) )/(2*eps)
+    }
+    numGrad
   }
 
   /** This method computes the numerical gradient using the mean squared error cost
@@ -96,7 +135,7 @@ object NNUtils {
     * @param params - Serialized weights and biases.
     * @return - Returns the numerical gradient calculated at theta = params.
     */
-  private def computeNumericalGradient(numSamples: Int, trainingData: DenseMatrix[Double], trainingLabels: DenseMatrix[Double],
+  private def computeNumericalGradientMSE(numSamples: Int, trainingData: DenseMatrix[Double], trainingLabels: DenseMatrix[Double],
                                weightDecayParameter: Double, params: DenseVector[Double]): DenseVector[Double] = {
     val m = params.size
     val numGrad = DenseVector.zeros[Double](m)
@@ -133,8 +172,27 @@ object NNUtils {
     }
   }
 
+  private def meanSquaredErrorLossForward(m: DenseMatrix[Double]) = {
+    layerOutputs = layerOutputs :+ NNUtils.sigmoidMatrix(m)
+  }
+
+  private def meanSquaredErrorLossBackward(targetLabels: DenseMatrix[Double]): DenseMatrix[Double] = {
+    -(targetLabels - layerOutputs.last) :* (layerOutputs.last :* (DenseMatrix.ones[Double](layerOutputs.last.rows, layerOutputs.last.cols) - layerOutputs.last))
+  }
+
+  private def softmaxLossForward(): Unit = {
+    val temp: DenseMatrix[Double] = layerWeights.last.t * layerOutputs.last
+    /** Calculate output for output layer using softmax function */
+    layerOutputs = layerOutputs :+ softmaxMatrix(temp(::,*) + layerBiases.last)
+  }
+
+  private def softmaxLossBackward(targetLabels: DenseMatrix[Double]): DenseMatrix[Double] = {
+    -(targetLabels - layerOutputs.last)
+  }
+
+
   /** This method performs the forward pass in the neural network populating layerOutputs. */
-  private def forward(input: DenseMatrix[Double], dropNodeList: List[DenseMatrix[Double]]): Unit = {
+  private def forward(input: DenseMatrix[Double], dropNodeList: List[DenseMatrix[Double]], error: String): Unit = {
     layerOutputs = layerOutputs.drop(layerOutputs.size)
     layerOutputs = layerOutputs :+ input
     for (i <- 0 to numNodesInLayers.size - 3) {
@@ -144,17 +202,17 @@ object NNUtils {
       layerOutputs = layerOutputs :+ (NNUtils.sigmoidMatrix(tempOut) :* dropNodeList(i))
     }
     val temp: DenseMatrix[Double] = layerWeights.last.t * layerOutputs.last
-    layerOutputs = layerOutputs :+ NNUtils.sigmoidMatrix( temp(::,*) + layerBiases.last)
-    /** Calculate output for output layer using softmax function */
-    /*var softmaxInput: DenseMatrix[Double] = layerWeights.last.t * layerOutputs.last
-    softmaxInput = softmaxInput(::, *) + layerBiases.last
-    val output = NNUtils.softmaxMatrix(softmaxInput)
-    layerOutputs = layerOutputs :+ output*/
+    if (error == "MSE") meanSquaredErrorLossForward(temp(::,*) + layerBiases.last)
+    else if (error == "SE") softmaxLossForward()
   }
 
   /** This method performs the backward pass in the neural network populating deltaLayerWeights and deltaLayerBaises. */
-  private def backward(numSamples: Int, targetLabels: DenseMatrix[Double], dropNodeList: List[DenseMatrix[Double]], weightDecay: Double): Unit = {
-    val outputDelta = -(targetLabels - layerOutputs.last) :* (layerOutputs.last :* (DenseMatrix.ones[Double](layerOutputs.last.rows, layerOutputs.last.cols) - layerOutputs.last))
+  private def backward(numSamples: Int, targetLabels: DenseMatrix[Double], dropNodeList: List[DenseMatrix[Double]], weightDecay: Double, error: String): Unit = {
+    assert(targetLabels.rows == layerOutputs.last.rows)
+    assert(targetLabels.cols == layerOutputs.last.cols)
+    var outputDelta: DenseMatrix[Double] = null
+    if (error == "MSE") outputDelta = meanSquaredErrorLossBackward(targetLabels)
+    else if (error == "SE") outputDelta = softmaxLossBackward(targetLabels)
     var delta = outputDelta
     val size = numNodesInLayers.size - 2
     val tempDeltaWeight: DenseMatrix[Double] = layerOutputs(size) * delta.t
@@ -331,7 +389,7 @@ object NNUtils {
     * @param dropoutProb - This is a dropout probability. Each node in hidden layer can be chucked out with this probability.
     */
 
-  def train(trainingSamples: DenseMatrix[Double], trainingLabels: DenseMatrix[Double], maxEpochs: Int,
+  def train(trainingSamples: DenseMatrix[Double], trainingLabels: DenseMatrix[Double], error: String, maxEpochs: Int,
             learningRate: Double, weightDecay: Double = 0.0, checkNumericalGrad: Boolean = false, isDropOut: Boolean = false, dropoutProb: Double = 0.0): Unit = {
     dropoutProbability = dropoutProb
     var epoch = 0
@@ -346,10 +404,12 @@ object NNUtils {
       deltaLayerBiases = List[DenseVector[Double]]()
       val dropNodeList = makeDropNodes(numSamples, numNodesInLayers, dropoutProbability, isDropOut)
       val shuffledTuple = shuffleMatrix(trainingSamples, trainingLabels)
-      forward(shuffledTuple._1, dropNodeList)
-      backward(numSamples, shuffledTuple._2, dropNodeList, weightDecay)
+      forward(shuffledTuple._1, dropNodeList, error)
+      backward(numSamples, shuffledTuple._2, dropNodeList, weightDecay, error)
       if (checkNumericalGrad) {
-        val numGrad = computeNumericalGradient(numSamples, shuffledTuple._1, shuffledTuple._2, weightDecay, NNUtils.serializeParams(layerWeights, layerBiases))
+        var numGrad: DenseVector[Double] = null
+        if (error == "MSE") numGrad = computeNumericalGradientMSE(numSamples, shuffledTuple._1, shuffledTuple._2, weightDecay, NNUtils.serializeParams(layerWeights, layerBiases))
+        else if (error == "SE") numGrad = computeNumericalGradientSE(numSamples, shuffledTuple._1, shuffledTuple._2, weightDecay, NNUtils.serializeParams(layerWeights, layerBiases))
         checkNumericalGradient(serializeParams(deltaLayerWeights, deltaLayerBiases), numGrad)
         epoch = 1
       }
