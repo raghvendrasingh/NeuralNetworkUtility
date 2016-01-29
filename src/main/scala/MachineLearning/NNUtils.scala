@@ -20,7 +20,6 @@ object NNUtils {
   private var deltaLayerWeights = List[DenseMatrix[Double]]()
   private var deltaLayerBiases = List[DenseVector[Double]]()
   private var numNodesInLayers = Vector[Int]()
-  private var dropoutProbability = 0.0
 
   /** This method initializes layer weights, layer biases and num nodes per layer of the neural net
     *
@@ -58,7 +57,7 @@ object NNUtils {
     * @param numSamples - Number of training samples.
     * @param trainingData - Training data matrix where each column represents one sample and no. of rows = no. of features per training sample.
     * @param trainingLabels - Training label matrix where each column represents one output sample and no. of rows = no. of output nodes in neural net.
-    * @param weightDecayParameter - Regularization parameter to avoid overfitting.
+    * @param weightDecayParameter - Regularization parameter to avoid over fitting.
     * @param params - Serialized weights and biases.
     * @return - Returns the mean squared error cost.
     */
@@ -82,11 +81,25 @@ object NNUtils {
     cost
   }
 
-
+  /** This method takes a DenseMatrix[Double] and returns a DenseMatrix[Double] with log of each element in it.
+    *
+    * @param m - A DenseMatrix[Double]
+    * @return - A DenseMatrix[Double] with log of each element in it.
+    */
   private def logMatrix(m: DenseMatrix[Double]): DenseMatrix[Double] = {
     m map (x => math.log(x))
   }
 
+  /** This method calculates the softmax cost. For details about softmax cost please refer
+    * http://ufldl.stanford.edu/tutorial/supervised/SoftmaxRegression/
+    *
+    * @param numSamples - Number of training samples.
+    * @param trainingData - Training data matrix where each column represents one sample and no. of rows = no. of features per training sample.
+    * @param trainingLabels - Training label matrix where each column represents one output sample and no. of rows = no. of output nodes in neural net.
+    * @param weightDecayParameter - Regularization parameter to avoid over fitting.
+    * @param params - Serialized weights and biases.
+    * @return - Returns the softmax error cost.
+    */
   private def softmaxCost(numSamples: Int, trainingData: DenseMatrix[Double], trainingLabels: DenseMatrix[Double],
                           weightDecayParameter: Double, params: DenseVector[Double]): Double = {
     val thetaTup = NNUtils.deserializeParams(numNodesInLayers, params)
@@ -113,8 +126,17 @@ object NNUtils {
     (-1.toDouble/numSamples) * temp3 + (weightDecayParameter/2) * temp4
   }
 
-  private def computeNumericalGradientSE(numSamples: Int, trainingData: DenseMatrix[Double], trainingLabels: DenseMatrix[Double],
-                                          weightDecayParameter: Double, params: DenseVector[Double]): DenseVector[Double] = {
+  /** This method computes the numerical gradient for softmax output layer.
+    *
+    * @param numSamples - Number of training samples.
+    * @param trainingData - Training data matrix where each column represents one sample and no. of rows = no. of features per training sample.
+    * @param trainingLabels - Training label matrix where each column represents one output sample and no. of rows = no. of output nodes in neural net.
+    * @param weightDecayParameter - Regularization parameter to avoid over fitting.
+    * @return - Returns the numerical gradient serialized to a DenseVector[Double].
+    */
+  def computeNumericalGradientSE(numSamples: Int, trainingData: DenseMatrix[Double], trainingLabels: DenseMatrix[Double],
+                                          weightDecayParameter: Double): DenseVector[Double] = {
+    val params = serializeParams(layerWeights, layerBiases)
     val m = params.size
     val numGrad = DenseVector.zeros[Double](m)
     val eps = 0.0001
@@ -131,12 +153,12 @@ object NNUtils {
     * @param numSamples - No. of training samples.
     * @param trainingData - Training data matrix where each column represents one sample and no. of rows = no. of features per training sample.
     * @param trainingLabels - Training label matrix where each column represents one output sample and no. of rows = no. of output nodes in neural net.
-    * @param weightDecayParameter - Regularization parameter to avoid overfitting.
-    * @param params - Serialized weights and biases.
-    * @return - Returns the numerical gradient calculated at theta = params.
+    * @param weightDecayParameter - Regularization parameter to avoid over fitting.
+    * @return - Returns the numerical gradient serialized to a DenseVector[Double].
     */
-  private def computeNumericalGradientMSE(numSamples: Int, trainingData: DenseMatrix[Double], trainingLabels: DenseMatrix[Double],
-                               weightDecayParameter: Double, params: DenseVector[Double]): DenseVector[Double] = {
+  def computeNumericalGradientMSE(numSamples: Int, trainingData: DenseMatrix[Double], trainingLabels: DenseMatrix[Double],
+                               weightDecayParameter: Double): DenseVector[Double] = {
+    val params = serializeParams(layerWeights, layerBiases)
     val m = params.size
     val numGrad = DenseVector.zeros[Double](m)
     val eps = 0.0001
@@ -150,10 +172,11 @@ object NNUtils {
 
   /** This method compares the gradient calculated using back propagation with the numerical gradient.
     *
-    * @param grad1 - gradient calculated using back propagation.
     * @param grad2 - numerical gradient.
     */
-  private def checkNumericalGradient(grad1: DenseVector[Double], grad2: DenseVector[Double]): Unit = {
+  def checkNumericalGradient(grad2: DenseVector[Double]): Unit = {
+    /** grad1 - gradient calculated using back propagation. */
+    val grad1 = serializeParams(deltaLayerWeights, deltaLayerBiases)
     assert(grad1.size == grad2.size)
     for (i <- 0 to grad1.size-1) println(grad1(i) + "  " + grad2(i) )
 
@@ -172,27 +195,46 @@ object NNUtils {
     }
   }
 
-  private def meanSquaredErrorLossForward(m: DenseMatrix[Double]) = {
-    layerOutputs = layerOutputs :+ NNUtils.sigmoidMatrix(m)
+  /** This method calculates the output of the neural network using sigmoid function. */
+  def meanSquaredErrorLossForward() = {
+    val temp: DenseMatrix[Double] = layerWeights.last.t * layerOutputs.last
+    /** Calculate output for output layer using sigmoid function */
+    layerOutputs = layerOutputs :+ NNUtils.sigmoidMatrix(temp(::,*) + layerBiases.last)
   }
 
-  private def meanSquaredErrorLossBackward(targetLabels: DenseMatrix[Double]): DenseMatrix[Double] = {
+  /** This method calculates the error using gradient of mean squared error loss.
+    *
+    * @param targetLabels - Training label matrix where each column represents one output sample and no. of rows = no. of output nodes in neural net.
+    * @return - error gradient to pass back into the neural network.
+    */
+  def meanSquaredErrorLossBackward(targetLabels: DenseMatrix[Double]): DenseMatrix[Double] = {
     -(targetLabels - layerOutputs.last) :* (layerOutputs.last :* (DenseMatrix.ones[Double](layerOutputs.last.rows, layerOutputs.last.cols) - layerOutputs.last))
   }
 
-  private def softmaxLossForward(): Unit = {
+  /** This method calculates the output of the neural network using softmax function. */
+  def softmaxLossForward(): Unit = {
     val temp: DenseMatrix[Double] = layerWeights.last.t * layerOutputs.last
     /** Calculate output for output layer using softmax function */
     layerOutputs = layerOutputs :+ softmaxMatrix(temp(::,*) + layerBiases.last)
   }
 
-  private def softmaxLossBackward(targetLabels: DenseMatrix[Double]): DenseMatrix[Double] = {
+  /** This method calculates the error using gradient of softmax error loss.
+    *
+    * @param targetLabels - Training label matrix where each column represents one output sample and no. of rows = no. of output nodes in neural net.
+    * @return - error gradient to pass back into the neural network.
+    */
+  def softmaxLossBackward(targetLabels: DenseMatrix[Double]): DenseMatrix[Double] = {
     -(targetLabels - layerOutputs.last)
   }
 
 
-  /** This method performs the forward pass in the neural network populating layerOutputs. */
-  private def forward(input: DenseMatrix[Double], dropNodeList: List[DenseMatrix[Double]], error: String): Unit = {
+  /** This method performs the forward pass in the neural network populating layerOutputs.
+    *
+    * @param input - Training data matrix where each column represents one sample and no. of rows = no. of features per training sample.
+    *              This will go as input to the neural network.
+    * @param dropNodeList - A list of DenseMatrix representing drop out nodes in each layer and for each training sample in data set.
+    */
+  def forward(input: DenseMatrix[Double], dropNodeList: List[DenseMatrix[Double]]): Unit = {
     layerOutputs = layerOutputs.drop(layerOutputs.size)
     layerOutputs = layerOutputs :+ input
     for (i <- 0 to numNodesInLayers.size - 3) {
@@ -201,18 +243,18 @@ object NNUtils {
       tempOut = tempOut(::, *) + layerBiases(i)
       layerOutputs = layerOutputs :+ (NNUtils.sigmoidMatrix(tempOut) :* dropNodeList(i))
     }
-    val temp: DenseMatrix[Double] = layerWeights.last.t * layerOutputs.last
-    if (error == "MSE") meanSquaredErrorLossForward(temp(::,*) + layerBiases.last)
-    else if (error == "SE") softmaxLossForward()
   }
 
-  /** This method performs the backward pass in the neural network populating deltaLayerWeights and deltaLayerBaises. */
-  private def backward(numSamples: Int, targetLabels: DenseMatrix[Double], dropNodeList: List[DenseMatrix[Double]], weightDecay: Double, error: String): Unit = {
-    assert(targetLabels.rows == layerOutputs.last.rows)
-    assert(targetLabels.cols == layerOutputs.last.cols)
-    var outputDelta: DenseMatrix[Double] = null
-    if (error == "MSE") outputDelta = meanSquaredErrorLossBackward(targetLabels)
-    else if (error == "SE") outputDelta = softmaxLossBackward(targetLabels)
+  /** This method performs the backward pass in the neural network populating deltaLayerWeights and deltaLayerBaises.
+    *
+    * @param numSamples - No. of training samples.
+    * @param outputDelta - error gradient from the output layer of the neural network.
+    * @param dropNodeList - A list of DenseMatrix representing drop out nodes in each layer and for each training sample in data set.
+    * @param weightDecay - Regularization parameter to avoid over fitting.
+    */
+  def backward(numSamples: Int, outputDelta: DenseMatrix[Double], dropNodeList: List[DenseMatrix[Double]], weightDecay: Double): Unit = {
+    deltaLayerWeights = List[DenseMatrix[Double]]()
+    deltaLayerBiases = List[DenseVector[Double]]()
     var delta = outputDelta
     val size = numNodesInLayers.size - 2
     val tempDeltaWeight: DenseMatrix[Double] = layerOutputs(size) * delta.t
@@ -271,12 +313,12 @@ object NNUtils {
     * sample and for first hidden layer we have first node dropped out but both second and third node present.
     *
     * @param n - Number of training samples in the dataset.
-    * @param v - This is a vector of number of nodes in each layer of the neural network.
     * @param p - It is the dropout probability.
     * @param isDropOut - This is a boolean flag to represent If we want to perform dropout or not.
     * @return - A list of DenseMatrix representing drop out nodes in each layer and for each training sample in data set.
     */
-  private def makeDropNodes(n: Int, v: Vector[Int], p: Double, isDropOut: Boolean): List[DenseMatrix[Double]] = {
+  def makeDropNodes(n: Int, p: Double, isDropOut: Boolean): List[DenseMatrix[Double]] = {
+    val v = numNodesInLayers
     var dropNodeIndicesPerHiddenLayer = List[DenseMatrix[Double]]()
     for (i <- 1 to v.size - 2) {
       val dropNodeIndices: DenseMatrix[Double] = DenseMatrix.ones(v(i), n)
@@ -356,7 +398,7 @@ object NNUtils {
     * @param learningRate - Learning rate used in optimization algorithm.
     * @param weightDecay - Regularization parameter to avoid overfitting.
     */
-  private def updateWeights(numSamples: Int, learningRate: Double, weightDecay: Double): Unit = {
+  def updateWeightsGradientDescent(numSamples: Int, learningRate: Double, weightDecay: Double): Unit = {
     var newLayerWeights = List[DenseMatrix[Double]]()
     var newLayerBiases = List[DenseVector[Double]]()
     try {
@@ -377,46 +419,7 @@ object NNUtils {
     }
   }
 
-  /** This method trains the neural net
-    *
-    * @param trainingSamples - Training data with one sample per column. No. of rows = No. of features per sample.
-    * @param trainingLabels - Training output with one output sample per column. No. of rows = No. of output units in neural net.
-    * @param maxEpochs - Maximum no. of iterations.
-    * @param learningRate - Learning rate used in the optimization algorithm.
-    * @param weightDecay - It is a regularization parameter to avoid overfitting in neural net.
-    * @param checkNumericalGrad - This a boolean flag to indicate numerical gradient check.
-    * @param isDropOut - This is a boolean flag to indicate use of dropout neural net.
-    * @param dropoutProb - This is a dropout probability. Each node in hidden layer can be chucked out with this probability.
-    */
 
-  def train(trainingSamples: DenseMatrix[Double], trainingLabels: DenseMatrix[Double], error: String, maxEpochs: Int,
-            learningRate: Double, weightDecay: Double = 0.0, checkNumericalGrad: Boolean = false, isDropOut: Boolean = false, dropoutProb: Double = 0.0): Unit = {
-    dropoutProbability = dropoutProb
-    var epoch = 0
-    val numSamples = trainingSamples.cols
-    var k = 1
-    while (epoch < maxEpochs) {
-      if (epoch == k * 100) {
-        println(s"${k * 100} epochs completed.")
-        k = k + 1
-      }
-      deltaLayerWeights = List[DenseMatrix[Double]]()
-      deltaLayerBiases = List[DenseVector[Double]]()
-      val dropNodeList = makeDropNodes(numSamples, numNodesInLayers, dropoutProbability, isDropOut)
-      val shuffledTuple = shuffleMatrix(trainingSamples, trainingLabels)
-      forward(shuffledTuple._1, dropNodeList, error)
-      backward(numSamples, shuffledTuple._2, dropNodeList, weightDecay, error)
-      if (checkNumericalGrad) {
-        var numGrad: DenseVector[Double] = null
-        if (error == "MSE") numGrad = computeNumericalGradientMSE(numSamples, shuffledTuple._1, shuffledTuple._2, weightDecay, NNUtils.serializeParams(layerWeights, layerBiases))
-        else if (error == "SE") numGrad = computeNumericalGradientSE(numSamples, shuffledTuple._1, shuffledTuple._2, weightDecay, NNUtils.serializeParams(layerWeights, layerBiases))
-        checkNumericalGradient(serializeParams(deltaLayerWeights, deltaLayerBiases), numGrad)
-        epoch = 1
-      }
-      updateWeights(numSamples, learningRate, weightDecay)
-      epoch = epoch + 1
-    }
-  }
 
   /** This method shuffles the column of the passed training sample matrix and training labels matrix.
     *
@@ -424,7 +427,7 @@ object NNUtils {
     * @param v - This is a training label matrix.
     * @return - Returns a tuple of shuffled training sample matrix and training label matrix.
     */
-  private def shuffleMatrix(m: DenseMatrix[Double], v: DenseMatrix[Double]): (DenseMatrix[Double], DenseMatrix[Double]) = {
+  def shuffleMatrix(m: DenseMatrix[Double], v: DenseMatrix[Double]): (DenseMatrix[Double], DenseMatrix[Double]) = {
     var sequence = List[Int]()
     for (i <- 0 to m.cols - 1)
       sequence = sequence :+ i
