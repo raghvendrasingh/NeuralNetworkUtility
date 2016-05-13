@@ -442,4 +442,33 @@ object NNUtils {
     }
     (res1, res2)
   }
+
+  /** This method calculates the euclidean distance between two given vectors
+    *
+    * @param a - First vector.
+    * @param b - Second vector.
+    * @return - Returns the euclidean distance between a and b vectors.
+    */
+  def getEuclideanDistance(a: List[Double], b: List[Double]): Double = {
+    var res = 0.0
+    assert(a.size == b.size)
+    for (i <- a.indices) res = res + math.pow(a(i) - b(i),2)
+    math.sqrt(res)
+  }
+
+  /** This method calculates the cosine distance between two given vectors
+    *
+    * @param a - First vector.
+    * @param b - Second vector.
+    * @return - Returns the cosine distance between a and b vectors.
+    */
+  def getCosineDistance(a: List[Double], b: List[Double]): Double = {
+    assert(a.size == b.size)
+    val d1 = math.sqrt(a.map(x => math.pow(x,2)).sum)
+    val d2 = math.sqrt(b.map(x => math.pow(x,2)).sum)
+    val dotProduct: Double = Utility.dotProductLists(a,b)
+    val denom = BigDecimal(d1*d2).setScale(5, BigDecimal.RoundingMode.HALF_UP).toDouble
+    Math.abs(Math.acos(dotProduct/denom) * (180.0/Math.PI))
+  }
+
 }
